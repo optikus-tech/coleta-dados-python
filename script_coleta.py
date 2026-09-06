@@ -5,6 +5,7 @@ import psutil as p
 import time
 from datetime import datetime
 import mysql.connector as mysql
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,12 +22,12 @@ controle_tempo = {
 def discretizar_cpu(uso_cpu):
     horario_atual = time.time()
     
-    if uso_cpu < 1.5:
+    if uso_cpu < 80:
         controle_tempo["cpu_inicio_critico"] = None
         controle_tempo["cpu_tempo_seg"] = 0
         return "NORMAL"
         
-    elif uso_cpu < 5:
+    elif uso_cpu < 90:
         controle_tempo["cpu_inicio_critico"] = None
         controle_tempo["cpu_tempo_seg"] = 0
         return "ALERTA"
@@ -47,12 +48,12 @@ def discretizar_cpu(uso_cpu):
 def discretizar_memoria(uso_memoria):
     horario_atual = time.time()
     
-    if uso_memoria < 1.5:
+    if uso_memoria < 80:
         controle_tempo["memoria_inicio_critico"] = None
         controle_tempo["memoria_tempo_seg"] = 0
         return "NORMAL"
         
-    elif uso_memoria < 5:
+    elif uso_memoria < 90:
         controle_tempo["memoria_inicio_critico"] = None
         controle_tempo["memoria_tempo_seg"] = 0
         return "ALERTA"
@@ -73,12 +74,12 @@ def discretizar_memoria(uso_memoria):
 def discretizar_disco(uso_disco):
     horario_atual = time.time()
     
-    if uso_disco < 1.5:
+    if uso_disco < 80:
         controle_tempo["disco_inicio_critico"] = None
         controle_tempo["disco_tempo_seg"] = 0
         return "NORMAL"
         
-    elif uso_disco < 5:
+    elif uso_disco < 90:
         controle_tempo["disco_inicio_critico"] = None
         controle_tempo["disco_tempo_seg"] = 0
         return "ALERTA"
@@ -195,9 +196,9 @@ def salvar_perfil():
 def coletar_dados():
     agora = datetime.now()
     uso_cpu = p.cpu_percent(interval=0.5)
-    status_cpu = discretizar_cpu(uso_cpu)
     frequencia = p.cpu_freq(percpu=False)
     frequencia_cpu = frequencia.current if frequencia else None
+    status_cpu = discretizar_cpu(uso_cpu)
 
     memoria = p.virtual_memory()
     memoria_total = memoria.total / (1024 ** 3)
@@ -248,7 +249,6 @@ def salvar_captura(maquina_id, dados):
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-            # VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 
         valores = (
             maquina_id,
@@ -282,41 +282,45 @@ def limpar():
 
 def voltar():
     print()
-    input("Pressione ENTER para voltar ao menu...")
+    input("| Pressione ENTER para voltar ao menu...")
     limpar()
 
 def exibir_menu():
     momento = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-    print("-" * 55)
-    print("MENU DE CONSULTA DE RECURSOS")
-    print()
-    print(f"Data e hora atual: {momento}")
-    print()
-    print("1. Menu de opções sobre a CPU")
-    print("2. Menu de memória RAM")
-    print("3. Menu de disco principal")
-    print("4. Captura completa")
-    print("5. Informações da máquina")
-    print()
-    print("Digite 'sair' para sair.")
-    print("-" * 55)
+    print("""
++--------------------------------------------+-----------------------------------------+
+|                    MENU DE CONSULTA DE RECURSOS                                      |
++--------------------------------------------+-----------------------------------------+
+| Data e hora atual: {:<65} |
++--------------------------------------------+-----------------------------------------+
+| 1. Menu de opções sobre a CPU                                                        |
+| 2. Menu de memória RAM                                                               |
+| 3. Menu de disco principal                                                           |
+| 4. Captura completa                                                                  |
+| 5. Informações da máquina                                                            |
+|                                                                                      |
+| Digite 'sair' para sair.                                                             |
++--------------------------------------------+-----------------------------------------+
+""".format(momento))
 
 def menu_cpu(maquina_id):
     while True:
         limpar()
 
-        print("-" * 50)
-        print("MENU CPU")
-        print()
-        print("1.1 Consultar o uso da CPU")
-        print("1.2 Consultar núcleos lógicos e físicos")
-        print("1.3 Consultar frequência da CPU")
-        print()
-        print("Digite 'voltar' para retornar.")
-        print("-" * 50)
+        print("""
++--------------------------------------------+-----------------------------------------+
+|                                  MENU CPU                                            |
++--------------------------------------------+-----------------------------------------+
+| 1.1 Consultar o uso da CPU                                                           |
+| 1.2 Consultar núcleos lógicos e físicos                                              |
+| 1.3 Consultar frequência da CPU                                                      |
+|                                                                                      |
+| Digite 'voltar' para retornar.                                                       |
++--------------------------------------------+-----------------------------------------+
+""")
 
-        opcao = input("Digite a opção desejada: ").strip().lower()
+        opcao = input("| Digite a opção desejada: ").strip().lower()
 
         if opcao == "1.1":
             limpar()
@@ -324,15 +328,23 @@ def menu_cpu(maquina_id):
             salvar_captura(maquina_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
-            print("-" * 50)
-            print("USO DA CPU")
-            print()
-            print(f"Momento da captura: {momento}")
-            print(f"Uso da CPU: {dados['uso_cpu']:.2f}%")
-            print()
-            print("Captura salva no banco de dados.")
-            print("-" * 50)
+            alerta = "SISTEMA NORMAL"
+            if dados['status_cpu'] != "NORMAL":
+                alerta = "Atenção! CPU em status " + dados['status_cpu']
 
+            print("""
++--------------------------------------------+-----------------------------------------+
+|                                USO DA CPU                                            |
++--------------------------------------------+-----------------------------------------+
+| Momento da captura: {:<64} |
+| Uso da CPU: {:<72} |
+| Status da CPU: {:<69} |
+| Situação: {:<74} |
+|                                                                                      |
+| Captura salva no banco de dados.                                                     |
++--------------------------------------------+-----------------------------------------+
+""".format(momento, f"{dados['uso_cpu']:.2f}%", dados['status_cpu'], alerta))
+            
             voltar()
 
         elif opcao == "1.2":
@@ -341,15 +353,17 @@ def menu_cpu(maquina_id):
             salvar_captura(maquina_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
-            print("-" * 50)
-            print("NÚCLEOS DA CPU")
-            print()
-            print(f"Momento da captura: {momento}")
-            print(f"Total de núcleos lógicos: {p.cpu_count(logical=True)}")
-            print(f"Total de núcleos físicos: {p.cpu_count(logical=False)}")
-            print()
-            print("Captura salva no banco de dados.")
-            print("-" * 50)
+            print("""
++--------------------------------------------+-----------------------------------------+
+|                              NÚCLEOS DA CPU                                          |
++--------------------------------------------+-----------------------------------------+
+| Momento da captura: {:<64} |
+| Total de núcleos lógicos: {:<58} |
+| Total de núcleos físicos: {:<58} |
+|                                                                                      |
+| Captura salva no banco de dados.                                                     |
++--------------------------------------------+-----------------------------------------+
+""".format(momento, p.cpu_count(logical=True), p.cpu_count(logical=False)))
 
             voltar()
 
@@ -359,19 +373,18 @@ def menu_cpu(maquina_id):
             salvar_captura(maquina_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
-            print("-" * 50)
-            print("FREQUÊNCIA DA CPU")
-            print()
-            print(f"Momento da captura: {momento}")
+            freq_txt = f"{dados['frequencia_cpu']:.2f} MHz" if dados["frequencia_cpu"] is not None else "Frequência da CPU indisponível."
 
-            if dados["frequencia_cpu"] is not None:
-                print(f"Frequência da CPU: {dados['frequencia_cpu']:.2f} MHz")
-            else:
-                print("Frequência da CPU indisponível.")
-
-            print()
-            print("Captura salva no banco de dados.")
-            print("-" * 50)
+            print("""
++--------------------------------------------+-----------------------------------------+
+|                           FREQUÊNCIA DA CPU                                          |
++--------------------------------------------+-----------------------------------------+
+| Momento da captura: {:<64} |
+| Frequência da CPU: {:<65} |
+|                                                                                      |
+| Captura salva no banco de dados.                                                     |
++--------------------------------------------+-----------------------------------------+
+""".format(momento, freq_txt))
 
             voltar()
 
@@ -380,24 +393,28 @@ def menu_cpu(maquina_id):
             break
 
         else:
-            print("Opção inválida.")
+            print("+--------------------------------------------+-----------------------------------------+")
+            print("| Opção inválida.                                                                      |")
+            print("+--------------------------------------------+-----------------------------------------+")
             time.sleep(1.5)
 
 def menu_memoria(maquina_id):
     while True:
         limpar()
 
-        print("-" * 50)
-        print("MENU MEMÓRIA RAM")
-        print()
-        print("2.1 Consultar o total de memória instalada")
-        print("2.2 Consultar a memória disponível")
-        print("2.3 Consultar percentual de uso da memória")
-        print()
-        print("Digite 'voltar' para retornar.")
-        print("-" * 50)
+        print("""
++--------------------------------------------+-----------------------------------------+
+|                            MENU MEMÓRIA RAM                                          |
++--------------------------------------------+-----------------------------------------+
+| 2.1 Consultar o total de memória instalada                                           |
+| 2.2 Consultar a memória disponível                                                   |
+| 2.3 Consultar percentual de uso da memória                                           |
+|                                                                                      |
+| Digite 'voltar' para retornar.                                                       |
++--------------------------------------------+-----------------------------------------+
+""")
 
-        opcao = input("Digite a opção desejada: ").strip().lower()
+        opcao = input("| Digite a opção desejada: ").strip().lower()
 
         if opcao == "2.1":
             limpar()
@@ -405,14 +422,16 @@ def menu_memoria(maquina_id):
             salvar_captura(maquina_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
-            print("-" * 50)
-            print("MEMÓRIA TOTAL")
-            print()
-            print(f"Momento da captura: {momento}")
-            print(f"Total de memória instalada: {dados['memoria_total']:.2f} GB")
-            print()
-            print("Captura salva no banco de dados.")
-            print("-" * 50)
+            print("""
++--------------------------------------------+-----------------------------------------+
+|                              MEMÓRIA TOTAL                                           |
++--------------------------------------------+-----------------------------------------+
+| Momento da captura: {:<64} |
+| Total de memória instalada: {:<56} |
+|                                                                                      |
+| Captura salva no banco de dados.                                                     |
++--------------------------------------------+-----------------------------------------+
+""".format(momento, f"{dados['memoria_total']:.2f} GB"))
 
             voltar()
 
@@ -420,17 +439,18 @@ def menu_memoria(maquina_id):
             limpar()
             dados = coletar_dados()
             salvar_captura(maquina_id, dados)
-
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
-            print("-" * 50)
-            print("MEMÓRIA DISPONÍVEL")
-            print()
-            print(f"Momento da captura: {momento}")
-            print(f"Memória disponível agora: {dados['memoria_disponivel']:.2f} GB")
-            print()
-            print("Captura salva no banco de dados.")
-            print("-" * 50)
+            print("""
++--------------------------------------------+-----------------------------------------+
+|                            MEMÓRIA DISPONÍVEL                                        |
++--------------------------------------------+-----------------------------------------+
+| Momento da captura: {:<64} |
+| Memória disponível agora: {:<58} |
+|                                                                                      |
+| Captura salva no banco de dados.                                                     |
++--------------------------------------------+-----------------------------------------+
+""".format(momento, f"{dados['memoria_disponivel']:.2f} GB"))
 
             voltar()
 
@@ -440,14 +460,22 @@ def menu_memoria(maquina_id):
             salvar_captura(maquina_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
-            print("-" * 50)
-            print("USO DA MEMÓRIA")
-            print()
-            print(f"Momento da captura: {momento}")
-            print(f"Percentual de uso da memória: {dados['uso_memoria']:.2f}%")
-            print()
-            print("Captura salva no banco de dados.")
-            print("-" * 50)
+            alerta = "SISTEMA NORMAL"
+            if dados['status_memoria'] != "NORMAL":
+                alerta = "Atenção! Memória em status " + dados['status_memoria']
+
+            print("""
++--------------------------------------------+-----------------------------------------+
+|                             USO DA MEMÓRIA                                           |
++--------------------------------------------+-----------------------------------------+
+| Momento da captura: {:<64} |
+| Percentual de uso da memória: {:<54} |
+| Status da Memória: {:<65} |
+| Situação: {:<74} |
+|                                                                                      |
+| Captura salva no banco de dados.                                                     |
++--------------------------------------------+-----------------------------------------+
+""".format(momento, f"{dados['uso_memoria']:.2f}%", dados['status_memoria'], alerta))
 
             voltar()
 
@@ -456,22 +484,26 @@ def menu_memoria(maquina_id):
             break
 
         else:
-            print("Opção inválida.")
+            print("+--------------------------------------------+-----------------------------------------+")
+            print("| Opção inválida.                                                                      |")
+            print("+--------------------------------------------+-----------------------------------------+")
             time.sleep(1.5)
 
 def menu_disco(maquina_id):
     while True:
         limpar()
 
-        print("-" * 50)
-        print("MENU DISCO")
-        print()
-        print("3.1 Consultar percentual de uso do disco principal")
-        print()
-        print("Digite 'voltar' para retornar.")
-        print("-" * 50)
+        print("""
++--------------------------------------------+-----------------------------------------+
+|                                MENU DISCO                                            |
++--------------------------------------------+-----------------------------------------+
+| 3.1 Consultar percentual de uso do disco principal                                   |
+|                                                                                      |
+| Digite 'voltar' para retornar.                                                       |
++--------------------------------------------+-----------------------------------------+
+""")
 
-        opcao = input("Digite a opção desejada: ").strip().lower()
+        opcao = input("| Digite a opção desejada: ").strip().lower()
 
         if opcao == "3.1":
             limpar()
@@ -479,14 +511,22 @@ def menu_disco(maquina_id):
             salvar_captura(maquina_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
-            print("-" * 50)
-            print("USO DO DISCO")
-            print()
-            print(f"Momento da captura: {momento}")
-            print(f"Uso do disco principal: {dados['uso_disco']:.2f}%")
-            print()
-            print("Captura salva no banco de dados.")
-            print("-" * 50)
+            alerta = "SISTEMA NORMAL"
+            if dados['status_disco'] != "NORMAL":
+                alerta = "Atenção! Disco em status " + dados['status_disco']
+
+            print("""
++--------------------------------------------+-----------------------------------------+
+|                              USO DO DISCO                                            |
++--------------------------------------------+-----------------------------------------+
+| Momento da captura: {:<64} |
+| Uso do disco principal: {:<60} |
+| Status do Disco: {:<67} |
+| Situação: {:<74} |
+|                                                                                      |
+| Captura salva no banco de dados.                                                     |
++--------------------------------------------+-----------------------------------------+
+""".format(momento, f"{dados['uso_disco']:.2f}%", dados['status_disco'], alerta))
 
             voltar()
 
@@ -495,38 +535,49 @@ def menu_disco(maquina_id):
             break
 
         else:
-            print("Opção inválida.")
+            print("+--------------------------------------------+-----------------------------------------+")
+            print("| Opção inválida.                                                                      |")
+            print("+--------------------------------------------+-----------------------------------------+")
             time.sleep(1.5)
 
 def captura_completa(maquina_id):
     limpar()
 
-    print("Realizando captura...")
+    print("+--------------------------------------------+-----------------------------------------+")
+    print("| Realizando captura...                                                                |")
+    print("+--------------------------------------------+-----------------------------------------+")
     print()
 
     dados = coletar_dados()
     salvar_captura(maquina_id, dados)
     momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
-    print("-" * 55)
-    print("CAPTURA COMPLETA")
-    print()
-    print(f"Momento da captura: {momento}")
-    print()
-    print(f"Uso da CPU: {dados['uso_cpu']:.2f}%")
+    freq_txt = f"{dados['frequencia_cpu']:.2f} MHz" if dados["frequencia_cpu"] is not None else "indisponível"
 
-    if dados["frequencia_cpu"] is not None:
-        print(f"Frequência da CPU: {dados['frequencia_cpu']:.2f} MHz")
-    else:
-        print("Frequência da CPU: indisponível")
-
-    print(f"Memória total: {dados['memoria_total']:.2f} GB")
-    print(f"Memória disponível: {dados['memoria_disponivel']:.2f} GB")
-    print(f"Uso da memória: {dados['uso_memoria']:.2f}%")
-    print(f"Uso do disco principal: {dados['uso_disco']:.2f}%")
-    print()
-    print("Captura salva com sucesso no banco de dados.")
-    print("-" * 55)
+    print("""
++--------------------------------------------+-----------------------------------------+
+|                            CAPTURA COMPLETA                                          |
++--------------------------------------------+-----------------------------------------+
+| Momento da captura: {:<64} |
+|                                                                                      |
+| Uso da CPU: {:<72} |
+| Frequência da CPU: {:<65} |
+| Memória total: {:<69} |
+| Memória disponível: {:<64} |
+| Uso da memória: {:<68} |
+| Uso do disco principal: {:<60} |
+|                                                                                      |
+| Captura salva com sucesso no banco de dados.                                         |
++--------------------------------------------+-----------------------------------------+
+""".format(
+    momento,
+    f"{dados['uso_cpu']:.2f}%",
+    freq_txt,
+    f"{dados['memoria_total']:.2f} GB",
+    f"{dados['memoria_disponivel']:.2f} GB",
+    f"{dados['uso_memoria']:.2f}%",
+    f"{dados['uso_disco']:.2f}%"
+))
 
     voltar()
 
@@ -535,28 +586,44 @@ def exibir_perfil():
 
     memoria_total = p.virtual_memory().total / (1024 ** 3)
 
-    print("-" * 55)
-    print("INFORMAÇÕES DA MÁQUINA")
-    print()
-    print(f"Nome da máquina: {socket.gethostname()}")
-    print(f"Sistema operacional: {platform.system()}")
-    print(f"Versão do sistema: {platform.release()}")
-    print(f"Núcleos físicos: {p.cpu_count(logical=False)}")
-    print(f"Núcleos lógicos: {p.cpu_count(logical=True)}")
-    print(f"Memória total: {memoria_total:.2f} GB")
-    print("-" * 55)
+    print("""
++--------------------------------------------+-----------------------------------------+
+|                        INFORMAÇÕES DA MÁQUINA                                        |
++--------------------------------------------+-----------------------------------------+
+| Nome da máquina: {:<67} |
+| Sistema operacional: {:<63} |
+| Versão do sistema: {:<65} |
+| Núcleos físicos: {:<67} |
+| Núcleos lógicos: {:<67} |
+| Memória total: {:<69} |
++--------------------------------------------+-----------------------------------------+
+""".format(
+    socket.gethostname(),
+    platform.system(),
+    platform.release(),
+    p.cpu_count(logical=False),
+    p.cpu_count(logical=True),
+    f"{memoria_total:.2f} GB"
+))
 
     voltar()
 
 def main():
     limpar()
 
-    print("Iniciando sistema de monitoramento...")
-    print("Conectando ao banco de dados...")
+    print("+--------------------------------------------+-----------------------------------------+")
+    print("| Iniciando sistema de monitoramento...                                                |")
+    print("| Conectando ao banco de dados...                                                      |")
+    print("+--------------------------------------------+-----------------------------------------+")
 
     maquina_id = salvar_perfil()
 
-    print(f"ID da máquina: {maquina_id}")
+    print("+--------------------------------------------+-----------------------------------------+")
+    print(f"| ID da máquina: {maquina_id:<69} |")
+    print("+--------------------------------------------+-----------------------------------------+")
+
+    thread_coleta = threading.Thread(target=iniciar_captura, args=(maquina_id,), daemon=True)
+    thread_coleta.start()
 
     time.sleep(2)
     limpar()
@@ -564,7 +631,7 @@ def main():
     while True:
         exibir_menu()
 
-        opcao = input("Digite a opção desejada: ").strip().lower()
+        opcao = input("| Digite a opção desejada: ").strip().lower()
 
         if opcao == "1":
             menu_cpu(maquina_id)
@@ -578,26 +645,28 @@ def main():
             exibir_perfil()
         elif opcao in ["sair", "exit", "quit", "q"]:
             limpar()
-            print("Encerrando sistema de monitoramento...")
+            print("+--------------------------------------------+-----------------------------------------+")
+            print("| Encerrando sistema de monitoramento...                                               |")
+            print("+--------------------------------------------+-----------------------------------------+")
             time.sleep(1)
-            print("Programa encerrado.")
+            print("+--------------------------------------------+-----------------------------------------+")
+            print("| Programa encerrado.                                                                  |")
+            print("+--------------------------------------------+-----------------------------------------+")
             break
         else:
-            print("Opção inválida.")
+            print("+--------------------------------------------+-----------------------------------------+")
+            print("| Opção inválida.                                                                      |")
+            print("+--------------------------------------------+-----------------------------------------+")
             time.sleep(1.5)
             limpar()
 
-# def iniciar_captura(maquina_id):
-#     i = 1 
-#     while True:
+def iniciar_captura(maquina_id):
+    while True:
           
-#         dados = coletar_dados()
-#         salvar_captura(maquina_id, dados)
-#         print("Captura" , i, "Pressione control + c para sair")
-#         time.sleep(10)
-#         i = i + 1
+        dados = coletar_dados()
+        salvar_captura(maquina_id, dados)
+        time.sleep(10)
     
-# iniciar_captura(1)
 main()
 
 
