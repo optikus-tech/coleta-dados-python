@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+EMPRESA_ID = 1
+
 controle_tempo = {
     "cpu_inicio_critico": None,
     "cpu_tempo_seg": 0,
@@ -97,101 +99,88 @@ def discretizar_disco(uso_disco):
             return "ALERTA (PICO EM OBSERVAÇÃO)"
 
 
-
 def conectar():
     try:
         return mysql.connect(
-            host=os.getenv("DB_HOST"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            database=os.getenv("DB_NAME")
+            host=os.getenv("DB_HOST", "localhost"),
+            user=os.getenv("DB_USER", "root"),
+            password=os.getenv("DB_PASSWORD", ""),
+            database=os.getenv("DB_NAME", "grupo_07")
         )
     except Exception as erro:
         print("Erro ao conectar ao banco de dados:", erro)
         raise SystemExit(1)
+
 
 def salvar_perfil():
     conexao = conectar()
     cursor = conexao.cursor()
 
     try:
-
         nome_maquina = socket.gethostname()
         nome_so = platform.system()
-        versao_so = platform.release()
-        memoria = p.virtual_memory()
-        memoria_total = memoria.total / (1024 ** 3)
-        nucleos_fisicos = p.cpu_count(logical=False)
-        nucleos_logicos = p.cpu_count(logical=True)
+        
+        try:
+            ip_maquina = socket.gethostbyname(nome_maquina)
+        except:
+            ip_maquina = "127.0.0.1"
 
         cursor.execute(
-            "SELECT id FROM maquinas WHERE nome = %s",
-            (nome_maquina,)
+            "SELECT id FROM servidor WHERE hostname = %s AND empresa_id = %s",
+            (nome_maquina, EMPRESA_ID)
         )
         resultado = cursor.fetchone()
 
         if resultado:
-            maquina_id = resultado[0]
-
+            servidor_id = resultado[0]
             atualizar = """
-                UPDATE maquinas SET
-                    sistema_operacional = %s,
-                    versao_sistema_operacional = %s,
-                    nucleos_fisicos = %s,
-                    nucleos_logicos = %s,
-                    memoria_total_gb = %s
-                WHERE id = %s
-
+                UPDATE servidor SET
+                    ip = %s,
+                    sistema_operacional = %s
+                WHERE id = %s AND empresa_id = %s
             """
-            print("Máquina atualizada com sucesso.")
-
-            valores = (
-                nome_so,
-                versao_so,
-                nucleos_fisicos,
-                nucleos_logicos,
-                memoria_total,
-                maquina_id
-            )
-
-            cursor.execute(atualizar, valores)
+            cursor.execute(atualizar, (ip_maquina, nome_so, servidor_id, EMPRESA_ID))
+            print("Servidor atualizado com sucesso.")
         else:
+            cursor.execute("SELECT COUNT(*) FROM servidor WHERE empresa_id = %s", (EMPRESA_ID,))
+            total = cursor.fetchone()[0]
+            servidor_id = total + 1
+
             inserir = """
-                INSERT INTO maquinas (
-                    nome,
-                    sistema_operacional,
-                    versao_sistema_operacional,
-                    nucleos_fisicos,
-                    nucleos_logicos,
-                    memoria_total_gb
-                )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO servidor (id, ip, hostname, sistema_operacional, empresa_id)
+                VALUES (%s, %s, %s, %s, %s)
             """
-            print("Máquina registrada com sucesso.")
+            cursor.execute(inserir, (servidor_id, ip_maquina, nome_maquina, nome_so, EMPRESA_ID))
+            print("Servidor registrado com sucesso.")
 
-            valores = (
-                nome_maquina,
-                nome_so,
-                versao_so,
-                nucleos_fisicos,
-                nucleos_logicos,
-                memoria_total
+        componentes_padrao = [(1, "CPU"), (2, "Memoria"), (3, "Disco")]
+        
+        for comp_id, comp_nome in componentes_padrao:
+            cursor.execute(
+                "SELECT id FROM componentes WHERE id = %s AND servidor_id = %s AND servidor_empresa_id = %s",
+                (comp_id, servidor_id, EMPRESA_ID)
             )
-
-            cursor.execute(inserir, valores)
-            maquina_id = cursor.lastrowid
+            if not cursor.fetchone():
+                cursor.execute(
+                    """
+                    INSERT INTO componentes (id, nome, servidor_id, servidor_empresa_id)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (comp_id, comp_nome, servidor_id, EMPRESA_ID)
+                )
 
         conexao.commit()
-        return maquina_id
+        return servidor_id
 
     except Exception as erro:
-        print("Erro ao salvar perfil da máquina:", erro)
+        print("Erro ao salvar perfil do servidor:", erro)
         conexao.rollback()
         raise SystemExit(1)
 
     finally:
         cursor.close()
         conexao.close()
+
 
 def coletar_dados():
     agora = datetime.now()
@@ -226,47 +215,30 @@ def coletar_dados():
         "tempo_disco": controle_tempo["disco_tempo_seg"]
     }
 
-def salvar_captura(maquina_id, dados):
+
+def salvar_captura(servidor_id, dados):
     conexao = conectar()
     cursor = conexao.cursor()
 
     try:
-        inserir_captura = """
-            INSERT INTO capturas (
-                maquina_id,
-                uso_cpu_percentual, 
-                status_cpu,
-                tempo_seg_cpu,
-                frequencia_cpu_mhz,
-                memoria_disponivel_gb,
-                uso_memoria_percentual,
-                status_memoria,
-                tempo_seg_memoria,
-                uso_disco_percentual,
-                status_disco,
-                tempo_seg_disco,
-                criado_em
+        sql = """
+            INSERT INTO captura (
+                tipo,
+                valor,
+                unidade_medida,
+                componentes_id,
+                componentes_servidor_id,
+                componentes_servidor_empresa_id
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """
 
-        valores = (
-            maquina_id,
-            dados["uso_cpu"],
-            dados["status_cpu"],
-            dados["tempo_cpu"],
-            dados["frequencia_cpu"],
-            dados["memoria_disponivel"],
-            dados["uso_memoria"],
-            dados["status_memoria"],
-            dados["tempo_memoria"],
-            dados["uso_disco"],
-            dados["status_disco"],
-            dados["tempo_disco"],
-            dados["momento"]
-        )
+        cursor.execute(sql, ("Uso CPU", dados["uso_cpu"], "%", 1, servidor_id, EMPRESA_ID))
 
-        cursor.execute(inserir_captura, valores)
+        cursor.execute(sql, ("Uso Memoria", dados["uso_memoria"], "%", 2, servidor_id, EMPRESA_ID))
+
+        cursor.execute(sql, ("Uso Disco", dados["uso_disco"], "%", 3, servidor_id, EMPRESA_ID))
+
         conexao.commit()
 
     except Exception as erro:
@@ -277,13 +249,16 @@ def salvar_captura(maquina_id, dados):
         cursor.close()
         conexao.close()
 
+
 def limpar():
     os.system("cls" if os.name == "nt" else "clear")
+
 
 def voltar():
     print()
     input("| Pressione ENTER para voltar ao menu...")
     limpar()
+
 
 def exibir_menu():
     momento = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -297,14 +272,15 @@ def exibir_menu():
 | 1. Menu de opções sobre a CPU                                                        |
 | 2. Menu de memória RAM                                                               |
 | 3. Menu de disco principal                                                           |
-| 4. Captura completa                                                                  |
+| 4. Captura completa                                                                 |
 | 5. Informações da máquina                                                            |
 |                                                                                      |
 | Digite 'sair' para sair.                                                             |
 +--------------------------------------------+-----------------------------------------+
 """.format(momento))
 
-def menu_cpu(maquina_id):
+
+def menu_cpu(servidor_id):
     while True:
         limpar()
 
@@ -325,7 +301,7 @@ def menu_cpu(maquina_id):
         if opcao == "1.1":
             limpar()
             dados = coletar_dados()
-            salvar_captura(maquina_id, dados)
+            salvar_captura(servidor_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
             alerta = "SISTEMA NORMAL"
@@ -350,7 +326,7 @@ def menu_cpu(maquina_id):
         elif opcao == "1.2":
             limpar()
             dados = coletar_dados()
-            salvar_captura(maquina_id, dados)
+            salvar_captura(servidor_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
             print("""
@@ -370,14 +346,14 @@ def menu_cpu(maquina_id):
         elif opcao == "1.3":
             limpar()
             dados = coletar_dados()
-            salvar_captura(maquina_id, dados)
+            salvar_captura(servidor_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
             freq_txt = f"{dados['frequencia_cpu']:.2f} MHz" if dados["frequencia_cpu"] is not None else "Frequência da CPU indisponível."
 
             print("""
 +--------------------------------------------+-----------------------------------------+
-|                           FREQUÊNCIA DA CPU                                          |
+|                            FREQUÊNCIA DA CPU                                         |
 +--------------------------------------------+-----------------------------------------+
 | Momento da captura: {:<64} |
 | Frequência da CPU: {:<65} |
@@ -398,7 +374,8 @@ def menu_cpu(maquina_id):
             print("+--------------------------------------------+-----------------------------------------+")
             time.sleep(1.5)
 
-def menu_memoria(maquina_id):
+
+def menu_memoria(servidor_id):
     while True:
         limpar()
 
@@ -419,7 +396,7 @@ def menu_memoria(maquina_id):
         if opcao == "2.1":
             limpar()
             dados = coletar_dados()
-            salvar_captura(maquina_id, dados)
+            salvar_captura(servidor_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
             print("""
@@ -438,7 +415,7 @@ def menu_memoria(maquina_id):
         elif opcao == "2.2":
             limpar()
             dados = coletar_dados()
-            salvar_captura(maquina_id, dados)
+            salvar_captura(servidor_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
             print("""
@@ -457,7 +434,7 @@ def menu_memoria(maquina_id):
         elif opcao == "2.3":
             limpar()
             dados = coletar_dados()
-            salvar_captura(maquina_id, dados)
+            salvar_captura(servidor_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
             alerta = "SISTEMA NORMAL"
@@ -489,7 +466,8 @@ def menu_memoria(maquina_id):
             print("+--------------------------------------------+-----------------------------------------+")
             time.sleep(1.5)
 
-def menu_disco(maquina_id):
+
+def menu_disco(servidor_id):
     while True:
         limpar()
 
@@ -508,7 +486,7 @@ def menu_disco(maquina_id):
         if opcao == "3.1":
             limpar()
             dados = coletar_dados()
-            salvar_captura(maquina_id, dados)
+            salvar_captura(servidor_id, dados)
             momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
             alerta = "SISTEMA NORMAL"
@@ -540,7 +518,8 @@ def menu_disco(maquina_id):
             print("+--------------------------------------------+-----------------------------------------+")
             time.sleep(1.5)
 
-def captura_completa(maquina_id):
+
+def captura_completa(servidor_id):
     limpar()
 
     print("+--------------------------------------------+-----------------------------------------+")
@@ -549,7 +528,7 @@ def captura_completa(maquina_id):
     print()
 
     dados = coletar_dados()
-    salvar_captura(maquina_id, dados)
+    salvar_captura(servidor_id, dados)
     momento = dados["momento"].strftime("%d/%m/%Y %H:%M:%S")
 
     freq_txt = f"{dados['frequencia_cpu']:.2f} MHz" if dados["frequencia_cpu"] is not None else "indisponível"
@@ -570,16 +549,17 @@ def captura_completa(maquina_id):
 | Captura salva com sucesso no banco de dados.                                         |
 +--------------------------------------------+-----------------------------------------+
 """.format(
-    momento,
-    f"{dados['uso_cpu']:.2f}%",
-    freq_txt,
-    f"{dados['memoria_total']:.2f} GB",
-    f"{dados['memoria_disponivel']:.2f} GB",
-    f"{dados['uso_memoria']:.2f}%",
-    f"{dados['uso_disco']:.2f}%"
-))
+        momento,
+        f"{dados['uso_cpu']:.2f}%",
+        freq_txt,
+        f"{dados['memoria_total']:.2f} GB",
+        f"{dados['memoria_disponivel']:.2f} GB",
+        f"{dados['uso_memoria']:.2f}%",
+        f"{dados['uso_disco']:.2f}%"
+    ))
 
     voltar()
+
 
 def exibir_perfil():
     limpar()
@@ -598,15 +578,23 @@ def exibir_perfil():
 | Memória total: {:<69} |
 +--------------------------------------------+-----------------------------------------+
 """.format(
-    socket.gethostname(),
-    platform.system(),
-    platform.release(),
-    p.cpu_count(logical=False),
-    p.cpu_count(logical=True),
-    f"{memoria_total:.2f} GB"
-))
+        socket.gethostname(),
+        platform.system(),
+        platform.release(),
+        p.cpu_count(logical=False),
+        p.cpu_count(logical=True),
+        f"{memoria_total:.2f} GB"
+    ))
 
     voltar()
+
+
+def iniciar_captura(servidor_id):
+    while True:
+        dados = coletar_dados()
+        salvar_captura(servidor_id, dados)
+        time.sleep(10)
+
 
 def main():
     limpar()
@@ -616,13 +604,13 @@ def main():
     print("| Conectando ao banco de dados...                                                      |")
     print("+--------------------------------------------+-----------------------------------------+")
 
-    maquina_id = salvar_perfil()
+    servidor_id = salvar_perfil()
 
     print("+--------------------------------------------+-----------------------------------------+")
-    print(f"| ID da máquina: {maquina_id:<69} |")
+    print(f"| ID do servidor: {servidor_id:<68} |")
     print("+--------------------------------------------+-----------------------------------------+")
 
-    thread_coleta = threading.Thread(target=iniciar_captura, args=(maquina_id,), daemon=True)
+    thread_coleta = threading.Thread(target=iniciar_captura, args=(servidor_id,), daemon=True)
     thread_coleta.start()
 
     time.sleep(2)
@@ -634,13 +622,13 @@ def main():
         opcao = input("| Digite a opção desejada: ").strip().lower()
 
         if opcao == "1":
-            menu_cpu(maquina_id)
+            menu_cpu(servidor_id)
         elif opcao == "2":
-            menu_memoria(maquina_id)
+            menu_memoria(servidor_id)
         elif opcao == "3":
-            menu_disco(maquina_id)
+            menu_disco(servidor_id)
         elif opcao == "4":
-            captura_completa(maquina_id)
+            captura_completa(servidor_id)
         elif opcao == "5":
             exibir_perfil()
         elif opcao in ["sair", "exit", "quit", "q"]:
@@ -660,13 +648,5 @@ def main():
             time.sleep(1.5)
             limpar()
 
-def iniciar_captura(maquina_id):
-    while True:
-          
-        dados = coletar_dados()
-        salvar_captura(maquina_id, dados)
-        time.sleep(10)
-    
+
 main()
-
-
